@@ -172,6 +172,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
+
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -234,8 +235,11 @@ def main_worker(gpu, ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer, epoch, args)
 
+        start = time.time()
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, args)
+        end = time.time()
+        print("time for one train loop %s" % (end - start))
 
         # evaluate on validation set
         acc1 = validate(val_loader, model, criterion, args)
@@ -266,35 +270,60 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         [batch_time, data_time, losses, top1, top5],
         prefix="Epoch: [{}]".format(epoch))
 
+
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.data.dim() == 4:
+                # param.data = param.data.contiguous(memory_format=torch.channels_last)
+                pass
+
     # switch to train mode
     model.train()
 
     end = time.time()
     for i, (images, target) in enumerate(train_loader):
+        torch.cuda.synchronize()
         # measure data loading time
+        print("Data", (time.time() - end)*1000, 'ms')
         data_time.update(time.time() - end)
+        end = time.time()
 
         if args.gpu is not None:
             images = images.cuda(args.gpu, non_blocking=True)
-        target = target.cuda(args.gpu, non_blocking=True)
 
-        # compute output
-        output = model(images)
-        loss = criterion(output, target)
+        # input(str(os.getpid())+"\n")
+        with torch.autograd.profiler.profile(use_cuda=True, record_shapes=False) as prof:
+        # if 1:
+            target = target.cuda(args.gpu, non_blocking=True)
 
-        # measure accuracy and record loss
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        losses.update(loss.item(), images.size(0))
-        top1.update(acc1[0], images.size(0))
-        top5.update(acc5[0], images.size(0))
+            # compute output
+            output = model(images)
+            loss = criterion(output, target)
 
-        # compute gradient and do SGD step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # measure accuracy and record loss
+            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            losses.update(loss.item(), images.size(0))
+            top1.update(acc1[0], images.size(0))
+            top5.update(acc5[0], images.size(0))
+            print("Model Forward ", (time.time() - end)*1000, 'ms')
+            # compute gradient and do SGD step
+            optimizer.zero_grad()
+            loss.backward()
+
+            # print(" ---------- PARAMETERS ------------------")
+            # for name, param in model.named_parameters():
+            #     if param.requires_grad:
+            #         print (name, param.data.shape, param.data.stride(), param.grad.shape, param.grad.stride())
+            # print(" ---------- END OF PARAMETERS ------------------")
+
+            optimizer.step()
+
+        print(prof.table(sort_by='self_cpu_time_total'))
 
         # measure elapsed time
+        torch.cuda.synchronize()
         batch_time.update(time.time() - end)
+        print("Model", (time.time() - end)*1000, 'ms')
         end = time.time()
 
         if i % args.print_freq == 0:
@@ -417,4 +446,5 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
+    print("Process pid is", os.getpid())
     main()
