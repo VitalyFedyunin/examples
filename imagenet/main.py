@@ -274,7 +274,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     for name, param in model.named_parameters():
         if param.requires_grad:
             if param.data.dim() == 4:
-                # param.data = param.data.contiguous(memory_format=torch.channels_last)
+                param.data = param.data.contiguous(memory_format=torch.channels_last)
                 pass
 
     # switch to train mode
